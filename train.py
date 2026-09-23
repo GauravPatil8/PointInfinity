@@ -11,6 +11,7 @@ XYZ plus normals.
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -118,7 +119,9 @@ def train_one_epoch(model, diffusion, loader, optimizer, device, grad_clip=None)
     model.train()
     total_loss = 0.0
     total_examples = 0
-    progress = tqdm(loader, desc="training", leave=False)
+    progress = tqdm(
+        loader, desc="training", leave=True, dynamic_ncols=True, file=sys.stdout
+    )
     for batch in progress:
         optimizer.zero_grad(set_to_none=True)
         loss = ddpm_loss(model, diffusion, batch, device)
@@ -138,7 +141,9 @@ def evaluate(model, diffusion, loader, device):
     model.eval()
     total_loss = 0.0
     total_examples = 0
-    progress = tqdm(loader, desc="validation", leave=False)
+    progress = tqdm(
+        loader, desc="validation", leave=True, dynamic_ncols=True, file=sys.stdout
+    )
     for batch in progress:
         loss = ddpm_loss(model, diffusion, batch, device)
         batch_size = batch["points"].shape[0]
