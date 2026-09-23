@@ -21,154 +21,46 @@ from functools import partial
 from timm.models.vision_transformer import PatchEmbed, Block
 from utils import get_2d_sincos_pos_embed, preprocess_img
 from modules import Denoiser_backbone
+from perceiver_pytorch import Perceiver
 
-class XYZPosEmbed(nn.Module):
-    """
-    A Masked Autoencoder with VisionTransformer backbone.
-    """
-    def __init__(self, embed_dim, num_heads):
+
+class PointCloudConditioning(nn.Module):
+    latent_dim = 512
+
+    def __init__(self):
         super().__init__()
-        self.embed_dim = embed_dim
+        self.model = Perceiver(
+            input_channels=6,          
+            input_axis=1,              
+            num_freq_bands=6,
+            max_freq=10.,
+            depth=6,
+            num_latents=256,
+            latent_dim=512,
+            cross_heads=1,
+            latent_heads=8,
+            cross_dim_head=64,
+            latent_dim_head=64,
+            num_classes=0,              # not doing classification
+            attn_dropout=0.,
+            ff_dropout=0.,
+            weight_tie_layers=False,
+            fourier_encode_data=False,
+            self_per_cross_attn=2,
+        )
+    def forward(self, points):
+        
+        """
+        points: [B, N, 6]
+                XYZ + normals
+        """
 
-        self.two_d_pos_embed = nn.Parameter(
-            torch.zeros(1, 64 + 1, embed_dim), requires_grad=False)
+        latents = self.model(
+            points,
+            return_embeddings=True
+        )
 
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.win_size = 8
-
-        self.pos_embed = nn.Linear(3, embed_dim)
-
-        self.blocks = nn.ModuleList([
-            Block(embed_dim, num_heads=num_heads, mlp_ratio=2.0, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6))
-            for _ in range(1)
-        ])
-
-        self.invalid_xyz_token = nn.Parameter(torch.zeros(embed_dim,))
-
-        self.initialize_weights()
-
-    def initialize_weights(self):
-        torch.nn.init.normal_(self.cls_token, std=.02)
-
-        two_d_pos_embed = get_2d_sincos_pos_embed(self.two_d_pos_embed.shape[-1], 8, cls_token=True)
-        self.two_d_pos_embed.data.copy_(torch.from_numpy(two_d_pos_embed).float().unsqueeze(0))
-
-        torch.nn.init.normal_(self.invalid_xyz_token, std=.02)
-
-    def forward(self, seen_xyz, valid_seen_xyz):
-        emb = self.pos_embed(seen_xyz)
-
-        emb[~valid_seen_xyz] = 0.0
-        emb[~valid_seen_xyz] += self.invalid_xyz_token
-
-        B, H, W, C = emb.shape
-        emb = emb.view(B, H // self.win_size, self.win_size, W // self.win_size, self.win_size, C)
-        emb = emb.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, self.win_size * self.win_size, C)
-
-        emb = emb + self.two_d_pos_embed[:, 1:, :]
-        cls_token = self.cls_token + self.two_d_pos_embed[:, :1, :]
-
-        cls_tokens = cls_token.expand(emb.shape[0], -1, -1)
-        emb = torch.cat((cls_tokens, emb), dim=1)
-        for _, blk in enumerate(self.blocks):
-            emb = blk(emb)
-        return emb[:, 0].view(B, (H // self.win_size) * (W // self.win_size), -1)
-
-class MCCEncoder(nn.Module):
-    """ 
-    MCC's RGB and XYZ encoder
-    """
-    def __init__(self,
-                 img_size=224, patch_size=16, in_chans=3, embed_dim=1024, depth=24, 
-                 num_heads=16, mlp_ratio=4., norm_layer=nn.LayerNorm, drop_path=0.1):
-        super().__init__()
-
-        self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
-        num_patches = self.patch_embed.num_patches
-        self.n_tokens = num_patches + 1
-        self.embed_dim = embed_dim
-
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)
-
-        self.blocks = nn.ModuleList([
-            Block(
-                embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer,
-                drop_path=drop_path
-            ) for i in range(depth)])
-
-        self.norm = norm_layer(embed_dim)
-
-        self.cls_token_xyz = nn.Parameter(torch.zeros(1, 1, embed_dim))
-
-        self.xyz_pos_embed = XYZPosEmbed(embed_dim, num_heads)
-
-        self.blocks_xyz = nn.ModuleList([
-            Block(
-                embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer,
-                drop_path=drop_path
-            ) for i in range(depth)])
-
-        self.norm_xyz = norm_layer(embed_dim)
-
-        self.initialize_weights()
-
-    def initialize_weights(self):
-
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
-
-        # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
-        w = self.patch_embed.proj.weight.data
-        torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
-
-        # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
-        torch.nn.init.normal_(self.cls_token, std=.02)
-        torch.nn.init.normal_(self.cls_token_xyz, std=.02)
-
-        # initialize nn.Linear and nn.LayerNorm
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            torch.nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-    def forward(self, x, seen_xyz, valid_seen_xyz):
-
-        # get tokens
-        x = self.patch_embed(x)
-        x = x + self.pos_embed[:, 1:, :]
-        y = self.xyz_pos_embed(seen_xyz, valid_seen_xyz)
-
-        ##### forward E_XYZ #####
-        # append cls token
-        cls_token_xyz = self.cls_token_xyz
-        cls_tokens_xyz = cls_token_xyz.expand(y.shape[0], -1, -1)
-
-        y = torch.cat((cls_tokens_xyz, y), dim=1)
-        # apply Transformer blocks
-        for blk in self.blocks_xyz:
-            y = blk(y)
-        y = self.norm_xyz(y)
-
-        ##### forward E_RGB #####
-        # append cls token
-        cls_token = self.cls_token + self.pos_embed[:, :1, :]
-        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-
-        x = torch.cat((cls_tokens, x), dim=1)
-        # apply Transformer blocks
-        for blk in self.blocks:
-            x = blk(x)
-        x = self.norm(x)
-
-        # combine encodings
-        return torch.cat([x, y], dim=2)
+        return latents
 
 class TwoStreamDenoiser(nn.Module):
     '''
@@ -187,18 +79,17 @@ class TwoStreamDenoiser(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        # define encoders
-        self.mcc_encoder = MCCEncoder(patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4,
-                                      norm_layer=partial(nn.LayerNorm, eps=1e-6))
+        # define encoder
+        self.point_cloud_conditioning = PointCloudConditioning()
         # define backbone
         self.denoiser_backbone = Denoiser_backbone(input_channels=input_channels, output_channels=output_channels, 
                                       num_x=num_points, num_z=num_latents, z_dim=latent_dim, 
                                       num_blocks=num_blocks, num_compute_layers=num_compute_layers)
         self.cond_embed = nn.Sequential(
             nn.LayerNorm(
-                normalized_shape=(self.mcc_encoder.embed_dim*2,)
+                normalized_shape=(self.point_cloud_conditioning.latent_dim,)
             ),
-            nn.Linear(self.mcc_encoder.embed_dim*2, self.denoiser_backbone.z_dim),
+            nn.Linear(self.point_cloud_conditioning.latent_dim, self.denoiser_backbone.z_dim),
         )
         self.cond_drop_prob = cond_drop_prob
         self.num_points = num_points
@@ -206,12 +97,7 @@ class TwoStreamDenoiser(nn.Module):
     def cached_model_kwargs(self, model_kwargs):
         with torch.no_grad():
             cond_dict = {}
-            images = preprocess_img(model_kwargs["images"])
-            embeddings = self.mcc_encoder(
-                images,
-                model_kwargs["seen_xyz"],
-                model_kwargs["seen_xyz_mask"],
-            )
+            embeddings = self.point_cloud_conditioning(model_kwargs["point_cloud"])
             cond_dict["embeddings"] = embeddings
             if "prev_latent" in model_kwargs:
                 cond_dict["prev_latent"] = model_kwargs["prev_latent"]
@@ -221,9 +107,7 @@ class TwoStreamDenoiser(nn.Module):
         self,
         x,
         t,
-        images=None,
-        seen_xyz=None,
-        seen_xyz_mask=None,
+        point_cloud=None,
         embeddings=None,
         prev_latent=None,
     ):
@@ -233,9 +117,8 @@ class TwoStreamDenoiser(nn.Module):
         Parameters:
         x: Tensor of shape [B, C, N_points], raw input point cloud.
         t: Tensor of shape [B], time step.
-        images (Tensor, optional): A batch of images to condition on.
-        seen_xyz (Tensor, optional): A batch of xyz maps to condition on.
-        seen_xyz_mask (Tensor, optional): Validity mask for xyz maps.
+        point_cloud (Tensor, optional): A batch of point clouds with XYZ and normals,
+                           shaped [B, N, 6].
         embeddings (Tensor, optional): A batch of conditional latent (avoid duplicate 
                                         computation of MCC encoder in diffusion inference)
         prev_latent (Tensor, optional): Self-conditioning latent.
@@ -243,14 +126,13 @@ class TwoStreamDenoiser(nn.Module):
         Returns:
         x_denoised: Tensor of shape [B, C, N_points], denoised point cloud/noise.
         """
-        assert images is not None or embeddings is not None, "must specify images or embeddings"
-        assert images is None or embeddings is None, "cannot specify both images and embeddings"
+        assert point_cloud is not None or embeddings is not None, "must specify point_cloud or embeddings"
+        assert point_cloud is None or embeddings is None, "cannot specify both point_cloud and embeddings"
         assert x.shape[-1] == self.num_points
 
-        # get the condition vectors with MCC encoders
-        if images is not None:
-            images = preprocess_img(images)
-            cond_vec = self.mcc_encoder(images, seen_xyz, seen_xyz_mask)
+        # get the condition vectors with the point cloud encoder
+        if point_cloud is not None:
+            cond_vec = self.point_cloud_conditioning(point_cloud)
         else:
             cond_vec = embeddings
         # condition dropout
