@@ -128,7 +128,7 @@ class TwoStreamDenoiser(nn.Module):
         """
         assert point_cloud is not None or embeddings is not None, "must specify point_cloud or embeddings"
         assert point_cloud is None or embeddings is None, "cannot specify both point_cloud and embeddings"
-        assert x.shape[-1] == self.num_points
+        # num_points assertion removed — architecture is resolution-invariant
 
         # get the condition vectors with the point cloud encoder
         if point_cloud is not None:
@@ -137,7 +137,7 @@ class TwoStreamDenoiser(nn.Module):
             cond_vec = embeddings
         # condition dropout
         if self.training:
-            mask = torch.rand(size=[len(x)]) >= self.cond_drop_prob
+            mask = torch.rand(size=[len(x)], device=x.device) >= self.cond_drop_prob
             cond_vec = cond_vec * mask[:, None, None].to(cond_vec)
         cond_vec = self.cond_embed(cond_vec)
 

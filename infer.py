@@ -71,7 +71,9 @@ def sample(model, condition, timesteps, device, seed):
         alpha_bar = alpha_bars[timestep]
         points = (points - (1.0 - alpha) * predicted_noise.transpose(1, 2) / (1.0 - alpha_bar).sqrt()) / alpha.sqrt()
         if timestep > 0:
-            points = points + betas[timestep].sqrt() * torch.randn(
+            alpha_bar_prev = alpha_bars[timestep - 1]
+            posterior_variance = betas[timestep] * (1.0 - alpha_bar_prev) / (1.0 - alpha_bar)
+            points = points + posterior_variance.sqrt() * torch.randn(
                 points.shape, device=device, generator=generator
             )
     return points

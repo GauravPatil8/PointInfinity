@@ -211,7 +211,7 @@ class Denoiser_backbone(nn.Module):
         """
         B, num_x, _ = x.shape
         num_cond = cond.shape[1]
-        assert num_x == self.num_x
+        # num_x is intentionally NOT asserted — the architecture is resolution-invariant
         if prev_latent is not None:
             _, num_z, _ = prev_latent.shape
             assert num_z == self.num_z + num_cond + 1
@@ -228,7 +228,7 @@ class Denoiser_backbone(nn.Module):
         # latent self-conditioning
         z = self.z_init.repeat(B, 1, 1) # [B, num_z, z_dim]
         z = torch.cat([z, cond, t_embed], dim=1) # [B, num_z + num_cond + 1, z_dim]
-        prev_latent = prev_latent + self.latent_mlp(prev_latent.detach())
+        prev_latent = (prev_latent + self.latent_mlp(prev_latent)).detach()
         z = z + self.ln_latent(prev_latent)
 
         # compute

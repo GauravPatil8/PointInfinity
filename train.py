@@ -97,7 +97,7 @@ class PointCloudDataset(Dataset):
         }
 
 
-def ddpm_loss(model, diffusion, batch, device):
+def ddpm_loss(model, diffusion, batch, device, self_cond_prob=0.5):
     """Compute the epsilon-prediction loss for one batch."""
     clean_points = batch["points"].to(device)
     point_cloud = batch["point_cloud"].to(device)
@@ -106,10 +106,24 @@ def ddpm_loss(model, diffusion, batch, device):
     )
     noise = torch.randn_like(clean_points)
     noisy_points = diffusion.q_sample(clean_points, timesteps, noise)
+    noisy_input = noisy_points.transpose(1, 2).contiguous()
+
+    # Self-conditioning: ~50% of the time, do a first pass to obtain the
+    # latent, then feed it back as prev_latent in the real (grad-enabled) pass.
+    prev_latent = None
+    if torch.rand(1).item() < self_cond_prob:
+        with torch.no_grad():
+            _, prev_latent = model(
+                noisy_input,
+                timesteps,
+                point_cloud=point_cloud,
+            )
+
     predicted_noise, _ = model(
-        noisy_points.transpose(1, 2).contiguous(),
+        noisy_input,
         timesteps,
         point_cloud=point_cloud,
+        prev_latent=prev_latent,
     )
     return nn.functional.mse_loss(predicted_noise, noise.transpose(1, 2).contiguous())
 
