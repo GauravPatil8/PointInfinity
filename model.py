@@ -15,20 +15,16 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from functools import partial
-from timm.models.vision_transformer import PatchEmbed, Block
-from utils import get_2d_sincos_pos_embed
 from modules import Denoiser_backbone
 from perceiver_pytorch import Perceiver
 
 
 class PointCloudConditioning(nn.Module):
-    latent_dim = 512
 
     def __init__(self):
         super().__init__()
+        self.latent_dim = 512
         self.model = Perceiver(
             input_channels=6,          
             input_axis=1,              
@@ -36,7 +32,7 @@ class PointCloudConditioning(nn.Module):
             max_freq=10.,
             depth=6,
             num_latents=256,
-            latent_dim=512,
+            latent_dim=self.latent_dim,
             cross_heads=1,
             latent_heads=8,
             cross_dim_head=64,

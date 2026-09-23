@@ -13,7 +13,7 @@ from model import TwoStreamDenoiser
 def load_condition(path, index):
     path = Path(path)
     if path.suffix in {".pt", ".pth"}:
-        payload = torch.load(path, map_location="cpu")
+        payload = torch.load(path, map_location="cpu", weights_only=True)
     elif path.suffix == ".npz":
         payload = dict(np.load(path))
     else:
@@ -39,7 +39,7 @@ def load_condition(path, index):
 
 
 def load_model(checkpoint_path, num_points, device):
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model = TwoStreamDenoiser(num_points=num_points).to(device)
     state_dict = checkpoint.get("model", checkpoint)
     model.load_state_dict(state_dict)
@@ -58,14 +58,20 @@ def sample(model, condition, timesteps, device, seed):
         condition.shape[0], model.num_points, 3, device=device, generator=generator
     )
 
+    # Cache the conditioning embeddings once instead of re-encoding every step.
+    cached = model.cached_model_kwargs({"point_cloud": condition})
+    embeddings = cached["embeddings"]
+
+    prev_latent = None
     for timestep in range(timesteps - 1, -1, -1):
         timestep_tensor = torch.full(
             (condition.shape[0],), timestep, device=device, dtype=torch.long
         )
-        predicted_noise, _ = model(
+        predicted_noise, prev_latent = model(
             points.transpose(1, 2).contiguous(),
             timestep_tensor,
-            point_cloud=condition,
+            embeddings=embeddings,
+            prev_latent=prev_latent,
         )
         alpha = alphas[timestep]
         alpha_bar = alpha_bars[timestep]

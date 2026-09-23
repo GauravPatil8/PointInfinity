@@ -61,7 +61,7 @@ class PointCloudDataset(Dataset):
     def __init__(self, path):
         path = Path(path)
         if path.suffix in {".pt", ".pth"}:
-            payload = torch.load(path, map_location="cpu")
+            payload = torch.load(path, map_location="cpu", weights_only=True)
         elif path.suffix == ".npz":
             payload = dict(np.load(path))
         else:
@@ -160,7 +160,7 @@ def evaluate(model, diffusion, loader, device):
         loader, desc="validation", leave=True, dynamic_ncols=True, disable=False
     )
     for batch in progress:
-        loss = ddpm_loss(model, diffusion, batch, device)
+        loss = ddpm_loss(model, diffusion, batch, device, self_cond_prob=0.0)
         batch_size = batch["points"].shape[0]
         total_loss += loss.item() * batch_size
         total_examples += batch_size
