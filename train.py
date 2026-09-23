@@ -11,13 +11,12 @@ XYZ plus normals.
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from model import TwoStreamDenoiser
@@ -120,7 +119,7 @@ def train_one_epoch(model, diffusion, loader, optimizer, device, grad_clip=None)
     total_loss = 0.0
     total_examples = 0
     progress = tqdm(
-        loader, desc="training", leave=True, dynamic_ncols=True, file=sys.stdout
+        loader, desc="training", leave=True, dynamic_ncols=True
     )
     for batch in progress:
         optimizer.zero_grad(set_to_none=True)
@@ -142,7 +141,7 @@ def evaluate(model, diffusion, loader, device):
     total_loss = 0.0
     total_examples = 0
     progress = tqdm(
-        loader, desc="validation", leave=True, dynamic_ncols=True, file=sys.stdout
+        loader, desc="validation", leave=True, dynamic_ncols=True
     )
     for batch in progress:
         loss = ddpm_loss(model, diffusion, batch, device)
