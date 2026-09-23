@@ -118,8 +118,9 @@ def train_one_epoch(model, diffusion, loader, optimizer, device, grad_clip=None)
     model.train()
     total_loss = 0.0
     total_examples = 0
+    print(f"training: {len(loader)} batches", flush=True)
     progress = tqdm(
-        loader, desc="training", leave=True, dynamic_ncols=True
+        loader, desc="training", leave=True, dynamic_ncols=True, disable=False
     )
     for batch in progress:
         optimizer.zero_grad(set_to_none=True)
@@ -140,8 +141,9 @@ def evaluate(model, diffusion, loader, device):
     model.eval()
     total_loss = 0.0
     total_examples = 0
+    print(f"validation: {len(loader)} batches", flush=True)
     progress = tqdm(
-        loader, desc="validation", leave=True, dynamic_ncols=True
+        loader, desc="validation", leave=True, dynamic_ncols=True, disable=False
     )
     for batch in progress:
         loss = ddpm_loss(model, diffusion, batch, device)
