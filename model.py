@@ -41,7 +41,7 @@ class PointCloudConditioning(nn.Module):
             latent_heads=8,
             cross_dim_head=64,
             latent_dim_head=64,
-            num_classes=None,           # not doing classification
+            num_classes=1,              # classifier output is unused; embeddings are returned
             attn_dropout=0.,
             ff_dropout=0.,
             weight_tie_layers=False,
