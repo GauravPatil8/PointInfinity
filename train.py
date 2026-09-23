@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from model import TwoStreamDenoiser
@@ -117,7 +118,8 @@ def train_one_epoch(model, diffusion, loader, optimizer, device, grad_clip=None)
     model.train()
     total_loss = 0.0
     total_examples = 0
-    for batch in loader:
+    progress = tqdm(loader, desc="training", leave=False)
+    for batch in progress:
         optimizer.zero_grad(set_to_none=True)
         loss = ddpm_loss(model, diffusion, batch, device)
         loss.backward()
@@ -127,6 +129,7 @@ def train_one_epoch(model, diffusion, loader, optimizer, device, grad_clip=None)
         batch_size = batch["points"].shape[0]
         total_loss += loss.detach().item() * batch_size
         total_examples += batch_size
+        progress.set_postfix(loss=f"{total_loss / max(total_examples, 1):.6f}")
     return total_loss / max(total_examples, 1)
 
 
@@ -135,11 +138,13 @@ def evaluate(model, diffusion, loader, device):
     model.eval()
     total_loss = 0.0
     total_examples = 0
-    for batch in loader:
+    progress = tqdm(loader, desc="validation", leave=False)
+    for batch in progress:
         loss = ddpm_loss(model, diffusion, batch, device)
         batch_size = batch["points"].shape[0]
         total_loss += loss.item() * batch_size
         total_examples += batch_size
+        progress.set_postfix(loss=f"{total_loss / max(total_examples, 1):.6f}")
     return total_loss / max(total_examples, 1)
 
 
