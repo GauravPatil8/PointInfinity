@@ -10,6 +10,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from timm.models.vision_transformer import Mlp, DropPath
 from utils import timestep_embedding
@@ -26,35 +27,31 @@ class CrossAttention(nn.Module):
     ):
         super().__init__()
         self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = head_dim ** -0.5
 
         kv_dim = dim if not kv_dim else kv_dim
         self.wq = nn.Linear(dim, dim, bias=qkv_bias)
         self.wk = nn.Linear(kv_dim, dim, bias=qkv_bias)
         self.wv = nn.Linear(kv_dim, dim, bias=qkv_bias)
         self.attn_drop_rate = attn_drop
-        self.attn_drop = nn.Dropout(self.attn_drop_rate)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x_q, x_kv):
         B, N_q, C = x_q.shape
         B, N_kv, _ = x_kv.shape
-        # [B, N_q, C] -> [B, N_q, H, C/H] -> [B, H, N_q, C/H]
+        # [B, N_q, C] -> [B, H, N_q, C/H]
         q = self.wq(x_q).reshape(B, N_q, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        # [B, N_kv, C] -> [B, N_kv, H, C/H] -> [B, H, N_kv, C/H]
+        # [B, N_kv, C] -> [B, H, N_kv, C/H]
         k = self.wk(x_kv).reshape(B, N_kv, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        # [B, N_kv, C] -> [B, N_kv, H, C/H] -> [B, H, N_kv, C/H]
+        # [B, N_kv, C] -> [B, H, N_kv, C/H]
         v = self.wv(x_kv).reshape(B, N_kv, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
 
-        # [B, H, N_q, C/H] @ [B, H, C/H, N_kv] -> [B, H, N_q, N_kv]
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-        
-        # [B, H, N_q, N_kv] @ [B, H, N_kv, C/H] -> [B, H, N_q, C/H]
-        x = attn @ v
+        x = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.attn_drop_rate if self.training else 0.0,
+        )
 
         # [B, H, N_q, C/H] -> [B, N_q, C]
         x = x.transpose(1, 2).reshape(B, N_q, C)

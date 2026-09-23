@@ -19,7 +19,7 @@ import torch.nn.functional as F
 
 from functools import partial
 from timm.models.vision_transformer import PatchEmbed, Block
-from utils import get_2d_sincos_pos_embed, preprocess_img
+from utils import get_2d_sincos_pos_embed
 from modules import Denoiser_backbone
 from perceiver_pytorch import Perceiver
 
@@ -64,15 +64,15 @@ class PointCloudConditioning(nn.Module):
 
 class TwoStreamDenoiser(nn.Module):
     '''
-    Full Point diffusion model using MCC's encoders with the Two Stream backbone
+    Point diffusion model using point-cloud conditioning with the Two Stream backbone
     '''
     def __init__(
         self,
         num_points: int = 1024,
         num_latents: int = 256,
         cond_drop_prob: float = 0.1,
-        input_channels: int = 6,
-        output_channels: int = 6,
+        input_channels: int = 3,
+        output_channels: int = 3,
         latent_dim: int = 768,
         num_blocks: int = 6,
         num_compute_layers: int = 4,
